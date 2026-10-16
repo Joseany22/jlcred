@@ -184,6 +184,7 @@
       <button class="ghost" onclick="openSettings()">⚙ Personalizar</button>
       <button class="ghost" onclick="cmSair()">🚪 Sair</button>
       <button class="primary" onclick="abrirCobranca()" id="btnCobranca" style="background:#e05a2b">🔔 Cobranças de hoje<span class="badge" id="cobBadge" style="display:none">0</span></button>
+      <button class="primary" onclick="openRenovacao()" style="background:#2563eb">🔄 Novo empréstimo (renovar)</button>
       <button class="primary" onclick="openClient()">＋ Novo cliente</button>
     </div>
   </header>
@@ -325,6 +326,19 @@
       <button class="ghost" onclick="closeModal('clientOverlay')">Cancelar</button>
       <button class="primary" onclick="saveClient()">Salvar</button>
     </footer>
+  </div>
+</div>
+
+<!-- Renovação: buscar cliente existente -->
+<div class="overlay" id="renovOverlay">
+  <div class="modal">
+    <header><h3>🔄 Renovar — novo empréstimo</h3><button class="x" onclick="closeModal('renovOverlay')">×</button></header>
+    <div class="body">
+      <p class="hint">Busque o cliente pelo <b>nome</b> ou <b>CPF</b>. O cadastro dele é puxado automaticamente e você só preenche o novo empréstimo (valor, parcelas...). O empréstimo anterior continua no histórico.</p>
+      <div class="field"><label>Buscar cliente</label><input id="renovBusca" placeholder="Digite o nome ou CPF" oninput="renderRenovLista(this.value)" autofocus></div>
+      <div id="renovLista" style="max-height:340px;overflow:auto;margin-top:6px"></div>
+    </div>
+    <footer><div style="flex:1"></div><button class="ghost" onclick="closeModal('renovOverlay')">Cancelar</button></footer>
   </div>
 </div>
 
@@ -692,6 +706,7 @@ function render(){
       <td><div class="rowbtns">
         ${(c.status!=='Quitado'&&(parseInt(c.parcTotal)||0)>0)?`<button title="Confirmar pagamento da parcela" onclick="confirmarPagamento('${c.id}')">✅</button>`:''}
         ${wa?`<button title="Enviar lembrete de vencimento no WhatsApp" onclick="lembrar('${c.id}')">🔔</button>`:''}
+        <button title="Renovar — lançar um novo empréstimo pra este cliente (puxa o cadastro)" onclick="openRenovacao('${c.id}')">🔄</button>
         <button title="Editar" onclick="openClient('${c.id}')">✎</button>
       </div></td>
     </tr>`;
@@ -711,7 +726,61 @@ function colorFor(name){if(!name)return '#9aa2c0';let h=0;for(const ch of name)h
 /* ---------- client modal ---------- */
 let tempFotos=[];
 function clearInvalid(){document.querySelectorAll('#clientOverlay .invalid').forEach(e=>e.classList.remove('invalid'));}
+/* ===== Renovação: novo empréstimo pra cliente existente ===== */
+let renovando=false;
+function openRenovacao(id){
+  if(id){ preencherRenov(id); return; }
+  if($('renovBusca'))$('renovBusca').value='';
+  renderRenovLista('');
+  showModal('renovOverlay');
+  setTimeout(function(){var b=$('renovBusca');if(b)b.focus();},50);
+}
+function renderRenovLista(q){
+  q=(q||'').toLowerCase().trim();
+  var qd=soDigitos(q);
+  var list=(db.clients||[]).filter(function(c){
+    if(!q)return true;
+    return (c.nome||'').toLowerCase().indexOf(q)>=0 || (qd && soDigitos(c.doc).indexOf(qd)>=0);
+  });
+  // uma linha por pessoa (por CPF), pegando o registro mais recente
+  var porCpf={};
+  list.forEach(function(c){ var k=soDigitos(c.doc)||c.id; if(!porCpf[k]) porCpf[k]=c; });
+  var uniq=Object.keys(porCpf).map(function(k){return porCpf[k];}).slice(0,40);
+  var box=$('renovLista'); if(!box)return;
+  if(!uniq.length){ box.innerHTML='<div class="hint" style="padding:14px">Nenhum cliente encontrado. Tente outro nome ou CPF.</div>'; return; }
+  box.innerHTML=uniq.map(function(c){
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 4px;border-bottom:1px solid var(--line)">'+
+      '<div><b>'+esc(c.nome||'—')+'</b><div class="hint">CPF '+esc(c.doc||'—')+(c.tel?(' · '+esc(c.tel)):'')+'</div></div>'+
+      '<button class="primary" onclick="preencherRenov(\''+c.id+'\')">Renovar</button></div>';
+  }).join('');
+}
+function preencherRenov(id){
+  var c=(db.clients||[]).find(function(x){return x.id===id;}); if(!c)return;
+  closeModal('renovOverlay');
+  renovando=true;
+  fillSelect($('cResp'),db.team,false);
+  fillSelect($('cCat'),db.categories||[],true,'— selecione —');
+  fillSelect($('cStatus'),db.statuses||[],false);
+  clearInvalid();limparErros();
+  $('cmTitle').textContent='🔄 Renovar — novo empréstimo de '+(c.nome||'');
+  $('cId').value=''; // NOVO registro (mantém o empréstimo anterior no histórico)
+  // dados do cadastro (puxados — pode ajustar se mudou)
+  $('cNome').value=c.nome||''; $('cDoc').value=c.doc||''; $('cNasc').value=c.nasc||''; $('cTel').value=c.tel||'';
+  $('cCep').value=c.cep||''; $('cNum').value=c.num||''; $('cRua').value=c.rua||''; $('cBairro').value=c.bairro||''; $('cCidade').value=c.cidade||'';
+  $('cEmpresa').value=c.empresa||''; $('cFuncao').value=c.funcao||''; $('cRenda').value=c.renda||'';
+  $('cCepTrab').value=c.cepTrab||''; $('cNumTrab').value=c.numTrab||''; $('cRuaTrab').value=c.ruaTrab||''; $('cBairroTrab').value=c.bairroTrab||''; $('cCidadeTrab').value=c.cidadeTrab||'';
+  $('cRef1Nome').value=c.ref1nome||''; $('cRef1Tel').value=c.ref1tel||''; $('cRef2Nome').value=c.ref2nome||''; $('cRef2Tel').value=c.ref2tel||''; $('cRef3Nome').value=c.ref3nome||''; $('cRef3Tel').value=c.ref3tel||'';
+  $('cResp').value=c.resp||db.team[0]||'';
+  // NOVO empréstimo: zera os dados do contrato
+  $('cCat').value=c.cat||''; $('cValor').value=''; $('cValorParc').value=''; $('cParcAtual').value='1'; $('cParcTotal').value=''; $('cContrato').value='';
+  $('cAssin').value=hojeISO(); $('cData').value=''; $('cStatus').value='Renovação'; $('cObs').value='';
+  tempFotos=(c.fotos||[]).slice(); // fotos do cliente já ficam salvas
+  $('cDelete').style.display='none';
+  calcTotal(); renderFotos(); showModal('clientOverlay'); setTimeout(calcVencimento,0);
+}
+
 function openClient(id){
+  renovando=false;
   fillSelect($('cResp'),db.team,false);
   fillSelect($('cCat'),db.categories||[],true,'— selecione —');
   fillSelect($('cStatus'),db.statuses||[],false);
@@ -911,7 +980,7 @@ function saveClient(){
   const cpf=soDigitos($('cDoc').value);
   // CPF já existe em OUTRO cadastro
   const dupe=cpf?db.clients.find(c=>c.id!==id && soDigitos(c.doc)===cpf):null;
-  if(dupe){
+  if(dupe && !renovando){
     if(!id){
       $('cDoc').classList.add('invalid');$('eDoc').textContent='CPF já cadastrado para: '+dupe.nome+'.';
       if(confirm('Já existe um cliente com este CPF ('+dupe.nome+').\n\nNão é possível cadastrar o mesmo CPF duas vezes. Deseja ABRIR o cadastro dele para renovar/editar?')){
@@ -949,6 +1018,7 @@ function saveClient(){
     if(i>=0)db.clients[i]=prev;else db.clients.pop();
     return;
   }
+  renovando=false;
   closeModal('clientOverlay');render();cmCloudSaveDebounced();
 }
 function trySave(){
